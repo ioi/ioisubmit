@@ -8,8 +8,9 @@ This command tries to submit the solution to CMS first and if it fails,
 the submit is kept locally and moved to CMS after the end of the contest.
 
 The `ioisubmit` command is typically called via wrapper scripts provided
-in task packages. These scripts provide the task name and language code,
-so the contestants have to specify only the source file.
+in task packages (see `submit-cpp17` for an example). These scripts provide the
+task name and language code, so the contestants have to specify only the source
+file.
 
 All submissions (regardless whether they made it to the CMS or not)
 are recorded in the local storage directory (see below) in files
