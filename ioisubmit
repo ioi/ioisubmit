@@ -1,0 +1,161 @@
+#!/usr/bin/python3
+# IOI submission tool
+# (c) 2024 Martin Mareš <mj@ucw.cz>
+
+from dataclasses import dataclass
+from datetime import datetime
+import argparse
+import hashlib
+import logging
+import logging.handlers
+import os
+import re
+import requests
+import sys
+from typing import Tuple, NoReturn
+
+
+CMS_URL = 'http://localhost:8888'
+LOCAL_STORAGE = '/tmp/submissions'
+
+
+@dataclass
+class Language:
+    code: str
+    cms_name: str
+    extension: str
+
+
+LANGUAGES = {
+    'c++17': Language('c++17', 'C++17 / g++', 'cpp'),
+    'c++20': Language('c++20', 'C++20 / g++', 'cpp'),
+}
+
+
+@dataclass
+class Submission:
+    task: str
+    lang: Language
+    key: str
+    local_path: str
+    hash: str = ""
+
+
+def die(msg: str) -> NoReturn:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def cms_submit(sub: Submission) -> Tuple[int, str]:
+    url = f'{CMS_URL}/tasks/{sub.task}/submit-api'
+    file = open(sub.local_path, 'rb')
+    files = {f'{sub.task}.%l': (f'{sub.task}.{sub.lang.extension}', file)}
+
+    try:
+        r = requests.post(url, files=files, data={'language': sub.lang.cms_name}, timeout=5)
+    except requests.exceptions.Timeout:
+        return (0, 'Timed out')
+    except requests.exceptions.ConnectionError:
+        return (0, 'Connection error')
+
+    if r.status_code != 200:
+        return (0, f'Server failed with HTTP status {r.status_code}')
+
+    try:
+        js = r.json()
+    except requests.exceptions.JSONDecodeError:
+        return (0, 'Error decoding reply')
+
+    if 'ok' in js:
+        return (1, 'Submitted')
+    elif 'error' in js:
+        err = js['error']
+        if 'detail' in js:
+            err += ' (' + js['detail'] + ')'
+        return (-1, err)
+    else:
+        return (0, 'Malformed reply')
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='Submits an IOI task solution')
+    parser.add_argument('task', help='task name')
+    parser.add_argument('file', help='file name')
+    parser.add_argument('--lang', required=True, choices=LANGUAGES.keys(), help='programming language')
+
+    args = parser.parse_args()
+
+    # This should match cms.db.types.Codename
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', args.task):
+        die('Task names must be alphanumeric')
+
+    if not args.file.endswith('.' + LANGUAGES[args.lang].extension):
+        die(f'File name should end with .{args.lang.extension}')
+
+    return args
+
+
+def make_submission(args) -> Submission:
+    when = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+    key = f'{when}:{args.task}:{args.lang}'
+
+    return Submission(
+        task=args.task,
+        lang=LANGUAGES[args.lang],
+        key=key,
+        local_path=LOCAL_STORAGE + '/' + key,
+    )
+
+
+def record_locally(sub: Submission, sol_filename: str) -> None:
+    try:
+        with open(sol_filename, 'rb') as sol_file:
+            sol = sol_file.read()
+    except OSError as e:
+        die(f'Cannot open {sol_filename}: {e.strerror}')
+
+    sub.hash = hashlib.sha256(sol).hexdigest()
+
+    try:
+        with open(sub.local_path, 'wb') as local_file:
+            local_file.write(sol)
+            local_file.flush()
+            os.fsync(local_file.fileno())
+    except OSError as e:
+        die(f'Cannot write local submit: {e.strerror}')
+
+
+def keep_locally(sub: Submission, verdict: str) -> None:
+    os.rename(sub.local_path, sub.local_path + '.' + verdict)
+
+    dir_fd = os.open(LOCAL_STORAGE, os.O_RDONLY)
+    os.fdatasync(dir_fd)
+    os.close(dir_fd)
+
+
+logger = logging.getLogger('ioisubmit')
+logger.setLevel(logging.DEBUG)
+handler = logging.handlers.SysLogHandler(address='/dev/log')
+handler.ident = 'ioisubmit: '
+logger.addHandler(handler)
+
+args = parse_args()
+sub = make_submission(args)
+print(f'Submitting solution of task {sub.task}')
+
+record_locally(sub, args.file)
+logger.info(f'Submission <{sub.key}>: Hash {sub.hash}')
+
+cms_ok, cms_msg = cms_submit(sub)
+if cms_ok > 0:
+    logger.info(f'Submission <{sub.key}>: Submitted to CMS')
+    keep_locally(sub, 'cmsok')
+    print('Submitted to CMS')
+elif cms_ok < 0:
+    logger.info(f'Submission <{sub.key}>: Rejected by CMS: {cms_msg}')
+    keep_locally(sub, 'cmsrej')
+    die(cms_msg)
+else:
+    logger.info(f'Submission <{sub.key}>: Recording locally')
+    keep_locally(sub, 'local')
+    print('CMS failed, submission recorded locally')
