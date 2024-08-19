@@ -46,6 +46,8 @@ API in the contest web server.
 
 ## Caveats
 
+Works only with IP-based logins to CMS.
+
 Output-only tasks are not supported.
 
 Tasks with multiple source files are not supported.
