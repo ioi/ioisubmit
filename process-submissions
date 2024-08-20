@@ -1,0 +1,237 @@
+#!/usr/bin/python3
+# Process submissions recorded by ioisubmit
+# (c) 2024 Martin Mareš <mj@ucw.cz>
+
+import argparse
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum, auto
+import hashlib
+import logging
+import logging.handlers
+import os
+from pathlib import Path
+import re
+import requests
+import sys
+from typing import Tuple, NoReturn, Dict, Optional, List
+
+
+class Status(Enum):
+    unknown = auto()
+    cms_submitted = auto()
+    cms_rejected = auto()
+    local_submitted = auto()
+
+
+extension_to_status: Dict[str, Status] = {
+    'cmsok': Status.cms_submitted,
+    'cmsrej': Status.cms_rejected,
+    'local': Status.local_submitted,
+}
+
+
+class Source(Enum):
+    local_storage = auto()
+    local_log = auto()
+    remote_log = auto()
+
+
+@dataclass
+class SourceStatus:
+    recorded: datetime
+    hash: Optional[str] = None
+    status: Status = Status.unknown
+
+
+@dataclass
+class Submission:
+    key: str
+    created: datetime
+    task: str
+    lang: str
+    sources: Dict[Source, SourceStatus] = field(default_factory=dict)
+    local_file: Optional[str] = None
+
+
+@dataclass
+class Submissions:
+    user: str
+    by_key: Dict[str, Submission] = field(default_factory=dict)
+
+    def find_submission(self, key: str) -> Submission:
+        if key not in self.by_key:
+            fields = key.split(':')
+            assert len(fields) == 3
+            f_when, f_task, f_lang = fields
+            when = datetime.strptime(f_when, '%Y%m%d-%H%M%S-%f').astimezone()
+            self.by_key[key] = Submission(key=key, created=when, task=f_task, lang=f_lang)
+        return self.by_key[key]
+
+
+def scan_local_storage(subs: Submissions, src_dir: Path) -> None:
+    for entry in src_dir.iterdir():
+        if ':' in entry.name:
+            if m := re.fullmatch(r'(.*)\.(\w+)', entry.name):
+                key = m[1]
+                status = extension_to_status.get(m[2], Status.unknown)
+                assert status != Status.unknown, f'Unknown extension in {entry}'
+            else:
+                key = entry.name
+                status = Status.unknown
+
+            sub = subs.find_submission(key)
+            mtime = datetime.fromtimestamp(entry.stat().st_mtime).astimezone()
+
+            with entry.open('rb') as f:
+                hash = hashlib.file_digest(f, hashlib.sha256).hexdigest()
+
+            sub.sources[Source.local_storage] = SourceStatus(recorded=mtime, hash=hash, status=status)
+            logger.debug(f'Local <{key}>: time={mtime.isoformat()} hash={hash} status={status.name}')
+
+
+def scan_log(subs: Submissions, src_file: Path, src: Source) -> None:
+    if not src_file.is_file():
+        logger.warn(f'Log file {src_file} is missing')
+        return
+
+    def parse_ioisubmit(when: datetime, msg: str) -> None:
+        m = re.fullmatch(r'Submission\s+<([^>]+)>:\s+(.*)', msg)
+        if not m:
+            logger.warn('Cannot parse ioisubmit log: {msg}')
+            return
+
+        key, action = m[1], m[2]
+        logger.debug(f'Log {src.name} <{key}>: time={when.isoformat()} {action}')
+        sub = subs.find_submission(key)
+
+        if m := re.fullmatch(r'Hash\s+([0-9a-f]+)', action):
+            if src in sub.sources:
+                logger.warn(f'Multiple initial actions for key {key}')
+            else:
+                sub.sources[src] = SourceStatus(recorded=when, hash=m[1])
+        elif ss := sub.sources.get(src, None):
+            if action == 'Submitted to CMS':
+                ss.status = Status.cms_submitted
+            elif action.startswith('Rejected by CMS:'):
+                ss.status = Status.cms_rejected
+            elif action == 'Recording locally':
+                ss.status = Status.local_submitted
+            else:
+                logger.warn(f'Cannot parse ioisubmit log (unknown action): {msg}')
+        else:
+            logger.warn(f'Cannot parse ioisubmit log (missing initial action): {msg}')
+
+    def parse_line(line: str) -> None:
+        fields = line.split(' ', maxsplit=1)
+        if len(fields) != 2:
+            logger.warn(f'Cannot parse log line: {line}')
+            return
+        f_when, f_rest = fields
+        try:
+            when = datetime.fromisoformat(f_when)
+        except ValueError:
+            logger.warn(f'Cannot parse timestamp in log line: {line}')
+            return
+        if f_rest.startswith('ioisubmit: '):
+            parse_ioisubmit(when, f_rest[11:])
+
+    with src_file.open() as file:
+        for line in file:
+            parse_line(line.rstrip())
+
+
+def drift(t: datetime, t0: datetime) -> int:
+    dt = t - t0
+    return int(dt.total_seconds())
+
+
+def process_submission(subs: Submissions, sub: Submission) -> None:
+    logger.debug(f'>> Submission <{sub.key}>')
+
+    if args.verbose:
+        logger.debug(f'    Meta: created={sub.created.isoformat()} task={sub.task} lang={sub.lang}')
+        for src, ss in sub.sources.items():
+            logger.debug(f'    In {src.name}: rec={ss.recorded} hash={ss.hash} status={ss.status.name}')
+
+    def check() -> List[str]:
+        errs = []
+
+        local_ss = sub.sources.get(Source.local_storage, None)
+        if local_ss is None:
+            errs.append('Found only in logs, but not in local storage')
+            return errs
+
+        if local_ss.status == Status.unknown:
+            errs.append('Incomplete submission')
+
+        local_drift = drift(local_ss.recorded, sub.created)
+        if abs(local_drift) >= 5:
+            errs.append(f'Timestamp is {local_drift}s off')
+
+        for src in (Source.local_storage, Source.local_log, Source.remote_log):
+            ss = sub.sources.get(src, None)
+            if ss is None:
+                errs.append(f'Missing from {src.name}')
+            else:
+                d = drift(ss.recorded, sub.created)
+                if abs(d) >= 60:
+                    errs.append(f'Timestamp in {src.name} is {d}s off')
+                if ss.hash != local_ss.hash:
+                    errs.append(f'Hash in {src.name} differs')
+                if ss.status != local_ss.status:
+                    errs.append(f'Status in {src.name} is {ss.status.name} instead of {local_ss.status.name}')
+
+        return errs
+
+    if errs := check():
+        logger.warn(f'Problematic submission <{subs.user}/{sub.key}>:')
+        for err in errs:
+            logger.warn(f'    {err}')
+
+    local_ss = sub.sources.get(Source.local_storage, None)
+    if local_ss is None:
+        return
+
+    if local_ss.status == Status.local_submitted:
+        logger.info(f'Decided to process <{subs.user}/{sub.key}>')
+
+
+def process_submissions(subs: Submissions) -> None:
+    for key, sub in sorted(subs.by_key.items()):
+        process_submission(subs, sub)
+
+
+def process_contestant(user: str) -> None:
+    logger.info(f'## Contestant {user}')
+    subs = Submissions(user)
+    src = Path(args.src) / user
+    scan_local_storage(subs, src / 'local-storage')
+    scan_log(subs, src / 'local-syslog', Source.local_log)
+    scan_log(subs, src / 'remote-syslog', Source.remote_log)
+    process_submissions(subs)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='Processes submissions recorded by ioisubmit')
+    parser.add_argument('--src', metavar='DIR', default='submissions', help='source directory (default: submissions)')
+    parser.add_argument('--contestant', metavar='LOGIN', help='process only a given contestant')
+    parser.add_argument('-v', '--verbose', default=False, action='store_true', help='show details of operations')
+    return parser.parse_args()
+
+
+args = parse_args()
+
+logging.basicConfig()
+logger = logging.getLogger('process-submissions')
+if args.verbose:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.INFO)
+
+if args.contestant is not None:
+    process_contestant(args.contestant)
+else:
+    for entry in Path(args.src).iterdir():
+        if re.fullmatch(r'\w+', entry.name):
+            process_contestant(entry.name)
