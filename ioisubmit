@@ -2,9 +2,9 @@
 # IOI submission tool
 # (c) 2024 Martin Mareš <mj@ucw.cz>
 
+import argparse
 from dataclasses import dataclass
 from datetime import datetime
-import argparse
 import hashlib
 import logging
 import logging.handlers
