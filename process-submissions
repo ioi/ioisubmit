@@ -8,13 +8,10 @@ from datetime import datetime
 from enum import Enum, auto
 import hashlib
 import logging
-import logging.handlers
-import os
 from pathlib import Path
 import re
-import requests
-import sys
-from typing import Tuple, NoReturn, Dict, Optional, List
+from termcolor import colored
+from typing import Dict, Optional, List
 
 
 class Status(Enum):
@@ -46,6 +43,7 @@ class SourceStatus:
 
 @dataclass
 class Submission:
+    ident: str
     key: str
     created: datetime
     task: str
@@ -65,7 +63,7 @@ class Submissions:
             assert len(fields) == 3
             f_when, f_task, f_lang = fields
             when = datetime.strptime(f_when, '%Y%m%d-%H%M%S-%f').astimezone()
-            self.by_key[key] = Submission(key=key, created=when, task=f_task, lang=f_lang)
+            self.by_key[key] = Submission(ident=f'<{self.user}/{key}>', key=key, created=when, task=f_task, lang=f_lang)
         return self.by_key[key]
 
 
@@ -147,9 +145,8 @@ def drift(t: datetime, t0: datetime) -> int:
 
 
 def process_submission(subs: Submissions, sub: Submission) -> None:
-    logger.debug(f'>> Submission <{sub.key}>')
-
     if args.verbose:
+        logger.debug(f'>> Submission {sub.ident}')
         logger.debug(f'    Meta: created={sub.created.isoformat()} task={sub.task} lang={sub.lang}')
         for src, ss in sub.sources.items():
             logger.debug(f'    In {src.name}: rec={ss.recorded} hash={ss.hash} status={ss.status.name}')
@@ -185,7 +182,7 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
         return errs
 
     if errs := check():
-        logger.warn(f'Problematic submission <{subs.user}/{sub.key}>:')
+        logger.warn(f'Problematic submission {sub.ident}:')
         for err in errs:
             logger.warn(f'    {err}')
 
@@ -194,7 +191,9 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
         return
 
     if local_ss.status == Status.local_submitted:
-        logger.info(f'Decided to process <{subs.user}/{sub.key}>')
+        logger.info(f'Decided to process {sub.ident}')
+    else:
+        logger.info(f'Skipping {sub.ident} (status {local_ss.status.name})')
 
 
 def process_submissions(subs: Submissions) -> None:
@@ -220,10 +219,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+class CustomLogFormatter(logging.Formatter):
+
+    def format(self, rec: logging.LogRecord) -> str:
+        msg = super().format(rec)
+        if rec.levelname == 'INFO':
+            return colored(msg, 'green')
+        elif rec.levelname == 'DEBUG':
+            return msg
+        else:
+            return colored(msg, 'red')
+
+
 args = parse_args()
 
 logging.basicConfig()
 logger = logging.getLogger('process-submissions')
+handler = logging.StreamHandler()
+handler.setFormatter(CustomLogFormatter(fmt='%(message)s'))
+logger.addHandler(handler)
+logger.propagate = False
 if args.verbose:
     logger.setLevel(logging.DEBUG)
 else:
