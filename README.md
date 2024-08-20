@@ -14,7 +14,7 @@ file.
 
 All submissions (regardless whether they made it to the CMS or not)
 are recorded in the local storage directory (see below) in files
-named `HHMMSS:microsec:task:lang.status`, where status is one of:
+named `YYYYMMDD-HHMMSS-microsec:task:lang.status`, where status is one of:
 
   - `.cmsok` if accepted by CMS
   - `.cmsrej` if rejected by CMS
@@ -42,6 +42,21 @@ owned by the contestant user with permissions `300`.
 
 Check that the version of CMS you use supports the provisional submission
 API in the contest web server.
+
+Set up both local and remote syslog. Remote syslog should record messages
+from each machine in a separate file.
+
+
+## Collecting local submissions
+
+After the contest is over, you need to download local submissions and
+log files. Create a directory `submissions` with a sub-directory for
+each contestant, named after the contestant's login name. The sub-directory
+should contain:
+
+  - `local-syslog` (local syslog from the contestant's machine)
+  - `remote-syslog` (remote syslog from the contestant's machine)
+  - `local-storage` (the local storage directory from the contestant's machine)
 
 
 ## Caveats
