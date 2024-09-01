@@ -90,13 +90,13 @@ def scan_local_storage(subs: Submissions, src_dir: Path) -> None:
 
 def scan_log(subs: Submissions, src_file: Path, src: Source) -> None:
     if not src_file.is_file():
-        logger.warn(f'Log file {src_file} is missing')
+        logger.warning(f'Log file {src_file} is missing')
         return
 
     def parse_ioisubmit(when: datetime, msg: str) -> None:
         m = re.fullmatch(r'Submission\s+<([^>]+)>:\s+(.*)', msg)
         if not m:
-            logger.warn('Cannot parse ioisubmit log: {msg}')
+            logger.warning('Cannot parse ioisubmit log: {msg}')
             return
 
         key, action = m[1], m[2]
@@ -105,7 +105,7 @@ def scan_log(subs: Submissions, src_file: Path, src: Source) -> None:
 
         if m := re.fullmatch(r'Hash\s+([0-9a-f]+)', action):
             if src in sub.sources:
-                logger.warn(f'Multiple initial actions for key {key}')
+                logger.warning(f'Multiple initial actions for key {key}')
             else:
                 sub.sources[src] = SourceStatus(recorded=when, hash=m[1])
         elif ss := sub.sources.get(src, None):
@@ -116,20 +116,20 @@ def scan_log(subs: Submissions, src_file: Path, src: Source) -> None:
             elif action == 'Recording locally':
                 ss.status = Status.local_submitted
             else:
-                logger.warn(f'Cannot parse ioisubmit log (unknown action): {msg}')
+                logger.warning(f'Cannot parse ioisubmit log (unknown action): {msg}')
         else:
-            logger.warn(f'Cannot parse ioisubmit log (missing initial action): {msg}')
+            logger.warning(f'Cannot parse ioisubmit log (missing initial action): {msg}')
 
     def parse_line(line: str) -> None:
         fields = line.split(' ', maxsplit=1)
         if len(fields) != 2:
-            logger.warn(f'Cannot parse log line: {line}')
+            logger.warning(f'Cannot parse log line: {line}')
             return
         f_when, f_rest = fields
         try:
             when = datetime.fromisoformat(f_when)
         except ValueError:
-            logger.warn(f'Cannot parse timestamp in log line: {line}')
+            logger.warning(f'Cannot parse timestamp in log line: {line}')
             return
         if f_rest.startswith('ioisubmit: '):
             parse_ioisubmit(when, f_rest[11:])
@@ -182,9 +182,9 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
         return errs
 
     if errs := check():
-        logger.warn(f'Problematic submission {sub.ident}:')
+        logger.warning(f'Problematic submission {sub.ident}:')
         for err in errs:
-            logger.warn(f'    {err}')
+            logger.warning(f'    {err}')
 
     local_ss = sub.sources.get(Source.local_storage, None)
     if local_ss is None:
