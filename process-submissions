@@ -85,6 +85,7 @@ def scan_local_storage(subs: Submissions, src_dir: Path) -> None:
                 hash = hashlib.file_digest(f, hashlib.sha256).hexdigest()
 
             sub.sources[Source.local_storage] = SourceStatus(recorded=mtime, hash=hash, status=status)
+            sub.local_file = str(src_dir / entry.name)
             logger.debug(f'Local <{key}>: time={mtime.isoformat()} hash={hash} status={status.name}')
 
 
@@ -192,6 +193,8 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
 
     if local_ss.status == Status.local_submitted:
         logger.info(f'Decided to process {sub.ident}')
+        warn = '  # CHECK LOG' if errs else ""
+        print(f'cmsAddSubmission --contest TODO --file "{sub.local_file}" --lang {sub.lang} {subs.user} {sub.task}{warn}')
     else:
         logger.info(f'Skipping {sub.ident} (status {local_ss.status.name})')
 
