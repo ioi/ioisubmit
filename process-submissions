@@ -14,6 +14,20 @@ from termcolor import colored
 from typing import Dict, Optional, List
 
 
+# This is shared with the ioisubmit tool
+@dataclass
+class Language:
+    code: str
+    cms_name: str
+    extension: str
+
+
+LANGUAGES = {
+    'c++17': Language('c++17', 'C++17 / g++', 'cpp'),
+    'c++20': Language('c++20', 'C++20 / g++', 'cpp'),
+}
+
+
 class Status(Enum):
     unknown = auto()
     cms_submitted = auto()
@@ -194,7 +208,9 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
     if local_ss.status == Status.local_submitted:
         logger.info(f'Decided to process {sub.ident}')
         warn = '  # CHECK LOG' if errs else ""
-        print(f'cmsAddSubmission --contest TODO --file "{sub.local_file}" --lang {sub.lang} {subs.user} {sub.task}{warn}')
+        cms_file = f'{sub.task}.%l'
+        cms_lang = LANGUAGES[sub.lang].cms_name
+        print(f'cmsAddSubmission --contest TODO_CONTEST_ID --file "{cms_file}:{sub.local_file}" --lang "{cms_lang}" --check-max-submissions {subs.user} {sub.task}{warn}')
     else:
         logger.info(f'Skipping {sub.ident} (status {local_ss.status.name})')
 
