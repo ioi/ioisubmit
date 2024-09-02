@@ -6,6 +6,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import json   # Needed for Python <3.11
 import logging
 import logging.handlers
 import os
@@ -63,7 +64,12 @@ def cms_submit(sub: Submission) -> Tuple[int, str]:
 
     try:
         js = r.json()
-    except requests.exceptions.JSONDecodeError:
+    # FIXME: Switch to this when we have Python >= 3.11
+    # except requests.exceptions.JSONDecodeError:
+    except json.JSONDecodeError:
+        # When the contest is over, CMS fails to log in, which produces HTML output
+        if r.content.startswith(b'<!DOCTYPE '):
+            return (0, 'Cannot log in')
         return (0, 'Error decoding reply')
 
     if 'ok' in js:
