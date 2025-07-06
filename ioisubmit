@@ -13,31 +13,27 @@ import re
 import requests
 import sys
 from typing import Tuple, NoReturn
+from zipfile import ZipFile
 
 
 CMS_URL = 'http://localhost:8888'
 LOCAL_STORAGE = '/tmp/submissions'
+LANGUAGE_EXTENSIONS = {'cpp'}
 
 
 @dataclass
-class Language:
-    code: str
-    cms_name: str
-    extension: str
-
-
-LANGUAGES = {
-    'c++17': Language('c++17', 'C++17 / g++', 'cpp'),
-    'c++20': Language('c++20', 'C++20 / g++', 'cpp'),
-}
+class SubmittedFile:
+    ident: str          # File identifier in CMS (e.g., "task.%l" or "output3.txt")
+    cms_name: str       # File name in CMS (e.g., "taks.cpp" or "output3.txt")
+    local_name: str     # Local name of the submitted file (including path)
 
 
 @dataclass
 class Submission:
     task: str
-    lang: Language
     key: str
     local_path: str
+    files: list[SubmittedFile]
     hash: str = ""
 
 
@@ -46,20 +42,47 @@ def die(msg: str) -> NoReturn:
     sys.exit(1)
 
 
-def cms_submit(sub: Submission) -> Tuple[int, str]:
-    url = f'{CMS_URL}/tasks/{sub.task}/submit-api'
-    file = open(sub.local_path, 'rb')
-    files = {f'{sub.task}.%l': (f'{sub.task}.{sub.lang.extension}', file)}
+class LoginError(RuntimeError):
+    pass
+
+
+def cms_login() -> str:
+    login_url = f'{CMS_URL}/api/login'
 
     try:
-        r = requests.post(url, files=files, data={'language': sub.lang.cms_name}, timeout=5)
+        r = requests.post(login_url, timeout=5)
+    except requests.exceptions.Timeout:
+        raise LoginError('Timed out')
+    except requests.exceptions.ConnectionError:
+        raise LoginError('Connection error')
+
+    try:
+        js = r.json()
+    except requests.exceptions.JSONDecodeError:
+        raise LoginError(f'Server gave non-JSON reply with status {r.status_code}')
+
+    if r.status_code != 200:
+        raise LoginError(js.get('error', 'Unknown error'))
+
+    return js['login_data']
+
+
+
+def cms_submit(sub: Submission) -> Tuple[int, str]:
+    try:
+        auth_token = cms_login()
+    except LoginError as err:
+        return (0, f'Login failed: {err}')
+
+    submit_url = f'{CMS_URL}/api/{sub.task}/submit'
+    files = {sf.ident: (sf.cms_name, open(sf.local_name, 'rb')) for sf in sub.files}
+
+    try:
+        r = requests.post(submit_url, files=files, headers={'X-CMS-Authorization': auth_token}, timeout=5)
     except requests.exceptions.Timeout:
         return (0, 'Timed out')
     except requests.exceptions.ConnectionError:
         return (0, 'Connection error')
-
-    if r.status_code != 200:
-        return (0, f'Server failed with HTTP status {r.status_code}')
 
     try:
         js = r.json()
@@ -67,15 +90,16 @@ def cms_submit(sub: Submission) -> Tuple[int, str]:
         # When the contest is over, CMS fails to log in, which produces HTML output
         if r.content.startswith(b'<!DOCTYPE '):
             return (0, 'Cannot log in')
-        return (0, 'Error decoding reply')
+        return (0, f'Server gave non-JSON reply with status {r.status_code}')
 
-    if 'ok' in js:
-        return (1, 'Submitted')
-    elif 'error' in js:
-        err = js['error']
-        if 'detail' in js:
-            err += ' (' + js['detail'] + ')'
+    if r.status_code != 200:
+        err = js.get('error', 'Unknown error')
+        if 'details' in js:
+            err += ' (' + js['details'] + ')'
         return (-1, err)
+
+    if 'id' in js:
+        return (1, 'Submitted')
     else:
         return (0, 'Malformed reply')
 
@@ -83,49 +107,87 @@ def cms_submit(sub: Submission) -> Tuple[int, str]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Submits an IOI task solution')
     parser.add_argument('task', help='task name')
-    parser.add_argument('file', help='file name')
-    parser.add_argument('--lang', required=True, choices=LANGUAGES.keys(), help='programming language')
+    parser.add_argument('file', nargs='+', help='file names')
+    parser.add_argument('--outputs',
+                        help='Output files are submitted in this task. '
+                             'This option contains a space-separated list of output file names '
+                             'without the suffix ".txt".')
+    parser.add_argument('--mixed', default=False, action='store_true',
+                        help='Allow submitting a program source in addition to output files.')
 
     args = parser.parse_args()
 
+    if args.mixed and not args.outputs:
+        parser.error('The --mixed option can be used only with --output')
+
     # This should match cms.db.types.Codename
     if not re.fullmatch(r'[A-Za-z0-9_-]+', args.task):
-        die('Task names must be alphanumeric')
-
-    if not args.file.endswith('.' + LANGUAGES[args.lang].extension):
-        die(f'File name should end with .{args.lang.extension}')
+        parser.error('Task names must be alphanumeric')
 
     return args
 
 
-def make_submission(args) -> Submission:
+def gather_files(args: argparse.Namespace) -> list[SubmittedFile]:
+    sources = []
+    outputs = []
+    allow_source = args.mixed or not args.outputs
+    allow_outputs = bool(args.outputs)
+
+    for file in args.file:
+        _, file_base = os.path.split(file)
+        prefix, ext = os.path.splitext(file_base)
+        if not os.path.exists(file):
+            die(f'File "{file}" does not exist')
+        if not os.path.isfile(file):
+            die(f'"{file}" is not a regular file')
+        if len(ext) < 2:
+            die(f'File "{file}" has no extension')
+        elif ext == '.txt':
+            if not allow_outputs:
+                die(f'Output files like "{file}" may not be submitted in this task')
+            if prefix not in args.outputs:
+                die(f'This task does not accept output file "{file}"')
+            if any(file_base == f.ident for f in outputs):
+                die(f'Output file "{file_base}" may not be submitted multiple times at once')
+            outputs.append(SubmittedFile(file_base, file_base, file))
+        elif ext[1:] in LANGUAGE_EXTENSIONS:
+            if not allow_source:
+                die(f'Program source files like "{file}" may not be submitted in this task')
+            if sources:
+                die('Only a single source file may be submitted')
+            sources.append(SubmittedFile(args.task + '.%l', args.task + ext, file))
+        else:
+            die(f'File "{file}" has an unrecognized extension "{ext}"')
+
+    return sources + outputs
+
+
+def make_submission(args: argparse.Namespace) -> Submission:
     when = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
-    key = f'{when}:{args.task}:{args.lang}'
+    key = f'{when}:{args.task}'
 
     return Submission(
         task=args.task,
-        lang=LANGUAGES[args.lang],
         key=key,
         local_path=LOCAL_STORAGE + '/' + key,
+        files=gather_files(args),
     )
 
 
-def record_locally(sub: Submission, sol_filename: str) -> None:
+def record_locally(sub: Submission) -> None:
     try:
-        with open(sol_filename, 'rb') as sol_file:
-            sol = sol_file.read()
+        with ZipFile(sub.local_path, mode='w') as zip:
+            for sf in sub.files:
+                zip.write(sf.local_name, arcname=sf.cms_name)
     except OSError as e:
-        die(f'Cannot open {sol_filename}: {e.strerror}')
-
-    sub.hash = hashlib.sha256(sol).hexdigest()
+        die(f'Error when processing submission: {e}')
 
     try:
-        with open(sub.local_path, 'wb') as local_file:
-            local_file.write(sol)
-            local_file.flush()
+        with open(sub.local_path, 'rb') as local_file:
             os.fsync(local_file.fileno())
+            sub.hash = hashlib.file_digest(local_file, 'sha256').hexdigest()
     except OSError as e:
-        die(f'Cannot write local submit: {e.strerror}')
+        die(f'Cannot write local submission: {e.strerror}')
 
 
 def keep_locally(sub: Submission, verdict: str) -> None:
@@ -146,7 +208,7 @@ args = parse_args()
 sub = make_submission(args)
 print(f'Submitting solution of task {sub.task}')
 
-record_locally(sub, args.file)
+record_locally(sub)
 logger.info(f'Submission <{sub.key}>: Hash {sub.hash}')
 
 cms_ok, cms_msg = cms_submit(sub)
@@ -159,6 +221,6 @@ elif cms_ok < 0:
     keep_locally(sub, 'cmsrej')
     die(cms_msg)
 else:
-    logger.info(f'Submission <{sub.key}>: Recording locally')
+    logger.info(f'Submission <{sub.key}>: Recording locally, CMS said: {cms_msg}')
     keep_locally(sub, 'local')
     print('CMS failed, submission recorded locally')
