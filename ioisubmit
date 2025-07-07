@@ -87,9 +87,6 @@ def cms_submit(sub: Submission) -> Tuple[int, str]:
     try:
         js = r.json()
     except requests.exceptions.JSONDecodeError:
-        # When the contest is over, CMS fails to log in, which produces HTML output
-        if r.content.startswith(b'<!DOCTYPE '):
-            return (0, 'Cannot log in')
         return (0, f'Server gave non-JSON reply with status {r.status_code}')
 
     if r.status_code != 200:
