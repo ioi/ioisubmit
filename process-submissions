@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # Process submissions recorded by ioisubmit
-# (c) 2024 Martin Mareš <mj@ucw.cz>
+# (c) 2024-2025 Martin Mareš <mj@ucw.cz>
 
 import argparse
 from dataclasses import dataclass, field
@@ -12,20 +12,6 @@ from pathlib import Path
 import re
 from termcolor import colored
 from typing import Dict, Optional, List
-
-
-# This is shared with the ioisubmit tool
-@dataclass
-class Language:
-    code: str
-    cms_name: str
-    extension: str
-
-
-LANGUAGES = {
-    'c++17': Language('c++17', 'C++17 / g++', 'cpp'),
-    'c++20': Language('c++20', 'C++20 / g++', 'cpp'),
-}
 
 
 class Status(Enum):
@@ -61,7 +47,6 @@ class Submission:
     key: str
     created: datetime
     task: str
-    lang: str
     sources: Dict[Source, SourceStatus] = field(default_factory=dict)
     local_file: Optional[str] = None
 
@@ -74,10 +59,10 @@ class Submissions:
     def find_submission(self, key: str) -> Submission:
         if key not in self.by_key:
             fields = key.split(':')
-            assert len(fields) == 3
-            f_when, f_task, f_lang = fields
+            assert len(fields) == 2
+            f_when, f_task = fields
             when = datetime.strptime(f_when, '%Y%m%d-%H%M%S-%f').astimezone()
-            self.by_key[key] = Submission(ident=f'<{self.user}/{key}>', key=key, created=when, task=f_task, lang=f_lang)
+            self.by_key[key] = Submission(ident=f'<{self.user}/{key}>', key=key, created=when, task=f_task)
         return self.by_key[key]
 
 
@@ -128,7 +113,7 @@ def scan_log(subs: Submissions, src_file: Path, src: Source) -> None:
                 ss.status = Status.cms_submitted
             elif action.startswith('Rejected by CMS:'):
                 ss.status = Status.cms_rejected
-            elif action == 'Recording locally':
+            elif action.startswith('Recording locally'):
                 ss.status = Status.local_submitted
             else:
                 logger.warning(f'Cannot parse ioisubmit log (unknown action): {msg}')
@@ -162,7 +147,7 @@ def drift(t: datetime, t0: datetime) -> int:
 def process_submission(subs: Submissions, sub: Submission) -> None:
     if args.verbose:
         logger.debug(f'>> Submission {sub.ident}')
-        logger.debug(f'    Meta: created={sub.created.isoformat()} task={sub.task} lang={sub.lang}')
+        logger.debug(f'    Meta: created={sub.created.isoformat()} task={sub.task}')
         for src, ss in sub.sources.items():
             logger.debug(f'    In {src.name}: rec={ss.recorded} hash={ss.hash} status={ss.status.name}')
 
@@ -209,14 +194,13 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
         logger.info(f'Decided to process {sub.ident}')
         warn = '  # CHECK LOG' if errs else ""
         cms_file = f'{sub.task}.%l'
-        cms_lang = LANGUAGES[sub.lang].cms_name
-        print(f'cmsAddSubmission --contest TODO_CONTEST_ID --file "{cms_file}:{sub.local_file}" --lang "{cms_lang}" --check-max-submissions {subs.user} {sub.task}{warn}')
+        print(f'cmsAddSubmission --contest TODO_CONTEST_ID --file "{cms_file}:{sub.local_file}" --check-max-submissions {subs.user} {sub.task}{warn}')
     else:
         logger.info(f'Skipping {sub.ident} (status {local_ss.status.name})')
 
 
 def process_submissions(subs: Submissions) -> None:
-    for key, sub in sorted(subs.by_key.items()):
+    for _, sub in sorted(subs.by_key.items()):
         process_submission(subs, sub)
 
 
@@ -240,11 +224,11 @@ def parse_args() -> argparse.Namespace:
 
 class CustomLogFormatter(logging.Formatter):
 
-    def format(self, rec: logging.LogRecord) -> str:
-        msg = super().format(rec)
-        if rec.levelname == 'INFO':
+    def format(self, record: logging.LogRecord) -> str:
+        msg = super().format(record)
+        if record.levelname == 'INFO':
             return colored(msg, 'green')
-        elif rec.levelname == 'DEBUG':
+        elif record.levelname == 'DEBUG':
             return msg
         else:
             return colored(msg, 'red')
