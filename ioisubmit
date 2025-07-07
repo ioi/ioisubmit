@@ -12,7 +12,7 @@ import os
 import re
 import requests
 import sys
-from typing import Tuple, NoReturn
+from typing import NoReturn
 from zipfile import ZipFile
 
 
@@ -68,7 +68,7 @@ def cms_login() -> str:
 
 
 
-def cms_submit(sub: Submission) -> Tuple[int, str]:
+def cms_submit(sub: Submission) -> tuple[int, str]:
     try:
         auth_token = cms_login()
     except LoginError as err:

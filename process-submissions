@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 import re
 from termcolor import colored
-from typing import Dict, Optional, List
+from typing import Optional
 
 
 class Status(Enum):
@@ -21,7 +21,7 @@ class Status(Enum):
     local_submitted = auto()
 
 
-extension_to_status: Dict[str, Status] = {
+extension_to_status: dict[str, Status] = {
     'cmsok': Status.cms_submitted,
     'cmsrej': Status.cms_rejected,
     'local': Status.local_submitted,
@@ -47,14 +47,14 @@ class Submission:
     key: str
     created: datetime
     task: str
-    sources: Dict[Source, SourceStatus] = field(default_factory=dict)
+    sources: dict[Source, SourceStatus] = field(default_factory=dict)
     local_file: Optional[str] = None
 
 
 @dataclass
 class Submissions:
     user: str
-    by_key: Dict[str, Submission] = field(default_factory=dict)
+    by_key: dict[str, Submission] = field(default_factory=dict)
 
     def find_submission(self, key: str) -> Submission:
         if key not in self.by_key:
@@ -151,7 +151,7 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
         for src, ss in sub.sources.items():
             logger.debug(f'    In {src.name}: rec={ss.recorded} hash={ss.hash} status={ss.status.name}')
 
-    def check() -> List[str]:
+    def check() -> list[str]:
         errs = []
 
         local_ss = sub.sources.get(Source.local_storage, None)
