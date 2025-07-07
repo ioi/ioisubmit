@@ -72,7 +72,7 @@ def cms_submit(sub: Submission) -> Tuple[int, str]:
     try:
         auth_token = cms_login()
     except LoginError as err:
-        return (0, f'Login failed: {err}')
+        return (0, f'Cannot login: {err}')
 
     submit_url = f'{CMS_URL}/api/{sub.task}/submit'
     files = {sf.ident: (sf.cms_name, open(sf.local_name, 'rb')) for sf in sub.files}
@@ -93,7 +93,12 @@ def cms_submit(sub: Submission) -> Tuple[int, str]:
         err = js.get('error', 'Unknown error')
         if 'details' in js:
             err += ' (' + js['details'] + ')'
-        return (-1, err)
+        if r.status_code == 400:
+            # Submission not accepted
+            return (-1, err)
+        else:
+            # Authentication errors, task not found etc.
+            return (0, err)
 
     if 'id' in js:
         return (1, 'Submitted')
@@ -216,7 +221,7 @@ if cms_ok > 0:
 elif cms_ok < 0:
     logger.info(f'Submission <{sub.key}>: Rejected by CMS: {cms_msg}')
     keep_locally(sub, 'cmsrej')
-    die(cms_msg)
+    die(f'Rejected by CMS: {cms_msg}')
 else:
     logger.info(f'Submission <{sub.key}>: Recording locally, CMS said: {cms_msg}')
     keep_locally(sub, 'local')
