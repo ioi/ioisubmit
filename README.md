@@ -37,7 +37,7 @@ FIXME: Scripts for the after-contest part.
 Edit `CMS_URL`, `LOCAL_STORAGE`, and `LANGUAGE_EXTENSIONS` in `ioisubmit`.
 
 Create local storage directories on contestants' machines, preferably
-owned by the contestant user with permissions `300` or `700`.
+owned by the contestant user with permissions `700`.
 
 Set up both local and remote syslog. Remote syslog should record messages
 from each machine in a separate file.
