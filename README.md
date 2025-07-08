@@ -32,7 +32,8 @@ their increasing timestamps.
 
 ## Setup
 
-Edit `CMS_URL`, `LOCAL_STORAGE`, and `LANGUAGE_EXTENSIONS` in `ioisubmit`.
+Edit `CMS_URL`, `LOCAL_STORAGE`, and `LANGUAGE_EXTENSIONS` in `ioisubmit`
+and `admin-submit`.
 
 Create local storage directories on contestants' machines, preferably
 owned by the contestant user with permissions `700`.
@@ -53,7 +54,8 @@ should contain:
   - `local-storage` (the local storage directory from the contestant's machine)
 
 Run `./process-submissions`, which produces a log file (to stderr) and a script
-(to stdout) that sends submissions to CMS using `./admin-submit`.
+(to stdout) that sends submissions to CMS using `./admin-submit`. The `CWS_ADMIN_TOKEN`
+environment variable must be set to `contest_admin_token` from the CMS configuration file.
 
 
 ## Caveats
