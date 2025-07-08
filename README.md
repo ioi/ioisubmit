@@ -29,8 +29,6 @@ When the contest is over, all local storage directories are scanned
 and submissions recorded locally are added to the CMS in order of
 their increasing timestamps.
 
-FIXME: Scripts for the after-contest part.
-
 
 ## Setup
 
@@ -53,6 +51,9 @@ should contain:
   - `local-syslog` (local syslog from the contestant's machine)
   - `remote-syslog` (remote syslog from the contestant's machine)
   - `local-storage` (the local storage directory from the contestant's machine)
+
+Run `./process-submissions`, which produces a log file (to stderr) and a script
+(to stdout) that sends submissions to CMS using `./admin-submit`.
 
 
 ## Caveats
