@@ -54,9 +54,9 @@ def cms_submit(args: argparse.Namespace) -> None:
                       files=files,
                       headers={'X-CMS-Authorization': auth_token},
                       data={
-                          'force_phase': '1',
-                          'force_official': '1',
-                          'force_min_interval': '1',
+                          'override_phase_check': '1',
+                          'override_official': '1',
+                          'override_min_interval': '1',
                       },
                       timeout=60)
 
