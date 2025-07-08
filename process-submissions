@@ -193,8 +193,7 @@ def process_submission(subs: Submissions, sub: Submission) -> None:
     if local_ss.status == Status.local_submitted:
         logger.info(f'Decided to process {sub.ident}')
         warn = '  # CHECK LOG' if errs else ""
-        cms_file = f'{sub.task}.%l'
-        print(f'cmsAddSubmission --contest TODO_CONTEST_ID --file "{cms_file}:{sub.local_file}" --check-max-submissions {subs.user} {sub.task}{warn}')
+        print(f'./admin-submit {subs.user} {sub.task} {sub.local_file}{warn}')
     else:
         logger.info(f'Skipping {sub.ident} (status {local_ss.status.name})')
 

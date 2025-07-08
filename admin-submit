@@ -1,0 +1,97 @@
+#!/usr/bin/python3
+# A tool for submitting solutions as ZIP files to CMS on behalf of contestants
+# (c) 2025 Martin Mareš <mj@ucw.cz>
+
+import argparse
+import os
+import requests
+import sys
+from typing import NoReturn
+
+
+CMS_URL = 'http://localhost:8888'
+
+
+def die(msg: str) -> NoReturn:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def get_admin_token() -> str:
+    token = os.getenv('CWS_ADMIN_TOKEN')
+    if token is None:
+        die('CWS_ADMIN_TOKEN not set')
+    return token
+
+
+def cms_login_as(user: str) -> str:
+    login_url = f'{CMS_URL}/api/login'
+    data = {
+        'username': user,
+        'admin_token': get_admin_token(),
+    }
+
+    r = requests.post(login_url, data, timeout=60)
+
+    try:
+        js = r.json()
+    except requests.exceptions.JSONDecodeError:
+        die(f'Server gave non-JSON reply to login with status {r.status_code}')
+
+    if r.status_code != 200:
+        error = js.get('error', 'Unknown error')
+        die(f'Cannot log in as {user}: {error}')
+
+    return js['login_data']
+
+
+def cms_submit(args: argparse.Namespace) -> None:
+    submit_url = f'{CMS_URL}/api/{args.task}/submit'
+    auth_token = cms_login_as(args.user)
+    files = {'submission': open(args.file, 'rb')}
+
+    r = requests.post(submit_url,
+                      files=files,
+                      headers={'X-CMS-Authorization': auth_token},
+                      data={
+                          'force_phase': '1',
+                          'force_official': '1',
+                          'force_min_interval': '1',
+                      },
+                      timeout=60)
+
+    try:
+        js = r.json()
+    except requests.exceptions.JSONDecodeError:
+        print(r.content)
+        die(f'Server gave non-JSON reply with status {r.status_code}')
+
+    if r.status_code != 200:
+        err = js.get('error', 'Unknown error')
+        if 'details' in js:
+            err += ' (' + js['details'] + ')'
+        if r.status_code == 422:
+            print(f'Submission rejected: {err}')
+            return
+        else:
+            die(f'API error: {err}')
+
+    if 'id' in js:
+        print(f'Submitted as ID {js["id"]}')
+    else:
+        die('Malformed API reply')
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='Submits an IOI task solution after the contest')
+    parser.add_argument('user', help='user name')
+    parser.add_argument('task', help='task name')
+    parser.add_argument('file', help='file name (a ZIP file as collected by ioisubmit)')
+
+    args = parser.parse_args()
+
+    return args
+
+
+args = parse_args()
+cms_submit(args)
