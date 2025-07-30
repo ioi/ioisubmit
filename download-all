@@ -1,0 +1,4 @@
+#!/bin/bash
+rm -rf submissions
+mkdir submissions
+<~/seats.csv parallel -P16 ./download

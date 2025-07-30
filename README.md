@@ -54,7 +54,9 @@ should contain:
   - `remote-syslog` (remote syslog from the contestant's machine)
   - `local-storage` (the local storage directory from the contestant's machine)
 
-Run `./process-submissions`, which produces a log file (to stderr) and a script
+See the `./download-all` script for an example.
+
+Then run `./process-submissions`, which produces a log file (to stderr) and a script
 (to stdout) that sends submissions to CMS using `./admin-submit`. The `CWS_ADMIN_TOKEN`
 environment variable must be set to `contest_admin_token` from the CMS configuration file.
 

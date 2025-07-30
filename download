@@ -1,0 +1,19 @@
+#!/bin/bash
+
+TODAY=$(date '+%Y-%m-%d')
+
+echo "$@" | (
+	IFS=, read USER TEAM FN LN CTRY XX SEAT XX2
+	MACH=$(echo $SEAT | tr A-Z a-z | sed 's/^\(.\)\(.\)$/\10\2/; s/^/ioi-/')
+	echo "$SEAT $USER $TEAM"
+	if [ $USER = username ] ; then
+		exit 0
+	fi
+	IP=$(grep $MACH /etc/hosts | awk '{print $1}')
+	echo "### $USER $SEAT $MACH $IP"
+	D=submissions/${USER}_$MACH
+	mkdir $D
+	rsync --rsh="ssh -oStrictHostKeyChecking=off" root@$MACH:/var/log/syslog $D/local-syslog
+	rsync --rsh="ssh -p3022" root@localhost:/data/logs/$IP/$TODAY $D/remote-syslog
+	rsync -a root@ioi-backup:/backup/backups/$MACH/.ioisubmit-do-not-delete/ $D/local-storage/
+)
