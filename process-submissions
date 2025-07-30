@@ -54,6 +54,7 @@ class Submission:
 @dataclass
 class Submissions:
     user: str
+    directory: str
     by_key: dict[str, Submission] = field(default_factory=dict)
 
     def find_submission(self, key: str) -> Submission:
@@ -121,6 +122,7 @@ def scan_log(subs: Submissions, src_file: Path, src: Source) -> None:
             logger.warning(f'Cannot parse ioisubmit log (missing initial action): {msg}')
 
     def parse_line(line: str) -> None:
+        line = line.replace(" localhost ", " ")
         fields = line.split(' ', maxsplit=1)
         if len(fields) != 2:
             logger.warning(f'Cannot parse log line: {line}')
@@ -203,10 +205,10 @@ def process_submissions(subs: Submissions) -> None:
         process_submission(subs, sub)
 
 
-def process_contestant(user: str) -> None:
-    logger.info(f'## Contestant {user}')
-    subs = Submissions(user)
-    src = Path(args.src) / user
+def process_contestant(user: str, directory: str) -> None:
+    logger.info(f'## Contestant {user} ({directory})')
+    subs = Submissions(user, directory)
+    src = Path(args.src) / directory
     scan_local_storage(subs, src / 'local-storage')
     scan_log(subs, src / 'local-syslog', Source.local_log)
     scan_log(subs, src / 'remote-syslog', Source.remote_log)
@@ -250,5 +252,5 @@ if args.contestant is not None:
     process_contestant(args.contestant)
 else:
     for entry in Path(args.src).iterdir():
-        if re.fullmatch(r'\w+', entry.name):
-            process_contestant(entry.name)
+        if (m := re.fullmatch(r'(\w+)(_.*)?', entry.name)) is not None:
+            process_contestant(m[1], entry.name)

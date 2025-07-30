@@ -46,7 +46,8 @@ from each machine in a separate file.
 
 After the contest is over, you need to download local submissions and
 log files. Create a directory `submissions` with a sub-directory for
-each contestant, named after the contestant's login name. The sub-directory
+each contestant, named after the contestant's login name (possibly
+with a otherwise ignored suffix "`_`anything". The sub-directory
 should contain:
 
   - `local-syslog` (local syslog from the contestant's machine)
